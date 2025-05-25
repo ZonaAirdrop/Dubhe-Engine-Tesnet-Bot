@@ -31,13 +31,13 @@ cd Dubhe-Engine-Tesnet-Bot
 ````
 npm install
 ````
-# Create File .env
+# (4) Create File .env
 
 ````
 nano .env
 ````
 
-# Paste wallet Details 
+# (5) Paste wallet Details 
 
 ````
 # PRIVATE_KEY_1=0x8xxx
@@ -56,7 +56,7 @@ http://user:pass@ip:port
 socks5://user:pass@ip:port
 ````
 
-# Running Bot 
+# (6) Running Bot 
 
 ````
 node index.js
