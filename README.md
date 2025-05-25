@@ -14,3 +14,5 @@
 
  🚀 Proxy support (HTTP/SOCKS)
  
+ # Installation
+ 
