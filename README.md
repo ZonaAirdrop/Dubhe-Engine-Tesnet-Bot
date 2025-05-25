@@ -67,3 +67,13 @@ node index.js
 npm uninstall @mysten/sui.js && npm install @mysten/sui.js
 git pull
 ````
+
+⚠️Notes 
+
+- ONLY use testnet wallets  
+- NEVER paste mainnet private keys  
+- This bot runs indefinitely (use `Ctrl + C` to stop)  
+- Testnet = Zero gas cost  
+- Randomized delays between operations for safety
+
+👉 Join Chanel https://t.me/ZonaAirdr0p
