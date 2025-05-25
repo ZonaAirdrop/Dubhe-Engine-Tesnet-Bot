@@ -16,3 +16,8 @@
  
  # Installation
  
+### Clone Bot Reposrory 
+
+````
+git clone https://github.com/ZonaAirdrop/Dubhe-Engine-Tesnet-Bot.git
+````
