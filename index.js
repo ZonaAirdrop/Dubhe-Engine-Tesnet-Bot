@@ -171,8 +171,8 @@ function getRandomProxy(proxies) {
   const proxy = parseProxy(proxies[randomIndex]);
   if (!proxy) {
     logger.warn(`Skipping invalid proxy: ${proxies[randomIndex]}`);
-    proxies.splice(randomIndex, 1); 
-    return getRandomProxy(proxies); 
+    proxies.splice(randomIndex, 1);
+    return getRandomProxy(proxies);
   }
   return proxy;
 }
@@ -245,7 +245,7 @@ function displayCountdown() {
     const hours = Math.floor(timeLeft / (1000 * 60 * 60));
     const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
-    process.stdout.write(`\r${colors.cyan}Next run in: ${hours}h ${minutes}m ${seconds}s${colors.reset}`);
+    process.stdout.write(`\rNext run in: ${hours}h ${minutes}m ${seconds}s     `);
     return false;
   };
 
@@ -253,94 +253,42 @@ function displayCountdown() {
     const interval = setInterval(() => {
       if (updateCountdown()) {
         clearInterval(interval);
+        process.stdout.write('\n');
         resolve();
       }
     }, 1000);
   });
 }
 
-async function wrapWsuI(client, keypair) {
-  logger.loading(`Wrapping wSUI for ${keypair.getPublicKey().toSuiAddress()}`);
-  const txb = new TransactionBlock();
-  const [splitCoin] = txb.splitCoins(txb.gas, [CONFIG.WRAP.amount]);
-  txb.moveCall({
+async function wrapSUI(client, keypair, amount) {
+  const tx = new TransactionBlock();
+  tx.moveCall({
     target: CONTRACTS.WRAP_TARGET,
-    arguments: [
-      txb.object(CONTRACTS.SHARED_OBJECT),
-      splitCoin,
-      txb.pure.address(keypair.getPublicKey().toSuiAddress()),
-    ],
-    typeArguments: ['0x2::sui::SUI'],
+    arguments: [tx.pure(amount)],
   });
-  try {
-    const result = await client.signAndExecuteTransactionBlock({
-      signer: keypair,
-      transactionBlock: txb,
-    });
-    logTx('Wrap wSUI', keypair, result?.digest);
-    logger.success(`Wrapped wSUI for ${keypair.getPublicKey().toSuiAddress()}`);
-  } catch (e) {
-    logError('Wrap', keypair, e);
-    throw e;
-  }
+
+  return client.signAndExecuteTransactionBlock({
+    transactionBlock: tx,
+    signer: keypair,
+  });
 }
 
-async function swapTokens(client, keypair, { amount, path, label, repeat }) {
-  for (let i = 0; i < repeat; i++) {
-    logger.loading(`${label} (Run ${i + 1}/${repeat}) for ${keypair.getPublicKey().toSuiAddress()}`);
-    const txb = new TransactionBlock();
-    txb.moveCall({
-      target: CONTRACTS.DEX_TARGET,
-      arguments: [
-        txb.object(CONTRACTS.SHARED_OBJECT),
-        txb.pure(BigInt(amount), 'u256'),
-        txb.pure(BigInt(1), 'u256'),
-        txb.pure(path, 'vector<u256>'),
-        txb.pure.address(keypair.getPublicKey().toSuiAddress()),
-      ],
-      typeArguments: [],
-    });
-    try {
-      const result = await client.signAndExecuteTransactionBlock({
-        signer: keypair,
-        transactionBlock: txb,
-      });
-      logTx(`${label} (Run ${i + 1})`, keypair, result?.digest);
-      logger.success(`${label} (Run ${i + 1}) completed for ${keypair.getPublicKey().toSuiAddress()}`);
-    } catch (e) {
-      logError(label, keypair, e);
-    }
-    if (i < repeat - 1 && CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
-  }
-}
-
-async function addLiquidity(client, keypair, { sharedObject, asset0, asset1, amount0, amount1, min0, min1, recipient, label }) {
-  logger.loading(`${label} for ${keypair.getPublicKey().toSuiAddress()}`);
-  const txb = new TransactionBlock();
-  txb.moveCall({
-    target: '0xa6477a6bf50e2389383b34a76d59ccfbec766ff2decefe38e1d8436ef8a9b245::dubhe_dex_system::add_liquidity',
+async function swap(client, keypair, amount, path) {
+  const tx = new TransactionBlock();
+  tx.moveCall({
+    target: CONTRACTS.DEX_TARGET,
     arguments: [
-      txb.object(sharedObject),
-      txb.pure(BigInt(asset0), 'u256'),
-      txb.pure(BigInt(asset1), 'u256'),
-      txb.pure(BigInt(amount0), 'u256'),
-      txb.pure(BigInt(amount1), 'u256'),
-      txb.pure(BigInt(min0), 'u256'),
-      txb.pure(BigInt(min1), 'u256'),
-      txb.pure.address(recipient),
+      tx.pure(path),
+      tx.pure(amount),
+      tx.pure(0), // min amount out
+      tx.pure(0), // deadline
     ],
-    typeArguments: [],
   });
-  try {
-    const result = await client.signAndExecuteTransactionBlock({
-      signer: keypair,
-      transactionBlock: txb,
-    });
-    logTx(label, keypair, result?.digest);
-    logger.success(`${label} completed for ${keypair.getPublicKey().toSuiAddress()}`);
-  } catch (e) {
-    logError(label, keypair, e);
-  }
+
+  return client.signAndExecuteTransactionBlock({
+    transactionBlock: tx,
+    signer: keypair,
+  });
 }
 
 function logTx(label, keypair, digest) {
@@ -348,168 +296,86 @@ function logTx(label, keypair, digest) {
   logger.step(`${label} for ${address}`);
   if (digest) {
     logger.info(`Transaction: https://testnet.suivision.xyz/txblock/${digest}`);
+    logger.info('thx - transaksi berhasil');
   } else {
     logger.error('Failed to retrieve transaction digest!');
   }
 }
 
 function logError(label, keypair, e) {
-  logger.error(`${label} failed for ${keypair.getPublicKey().toSuiAddress()}: ${e.message}`);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function replayWithKey(keyData, proxies) {
-  let keypair;
-  if (keyData.type === 'privateKey') {
-    const { secretKey } = decodeSuiPrivateKey(keyData.value);
-    keypair = Ed25519Keypair.fromSecretKey(secretKey);
-  } else {
-    keypair = keyData.keypair;
-  }
-
   const address = keypair.getPublicKey().toSuiAddress();
-  logger.wallet(`Processing wallet: ${address}`);
-
-  const proxy = getRandomProxy(proxies);
-  if (proxy) {
-    logger.info(`Using proxy: ${proxy.url} (${proxy.protocol}) for ${address}`);
-  } else {
-    logger.warn(`No proxy used for ${address}`);
-  }
-
-  const clientOptions = {
-    url: getFullnodeUrl('testnet'),
-    transport: proxy ? { httpAgent: proxy.agent, httpsAgent: proxy.agent } : undefined,
-  };
-  const client = new SuiClient(clientOptions);
-
-  if (CONFIG.WRAP.enabled) {
-    try {
-      await wrapWsuI(client, keypair);
-    } catch {
-      return;
-    }
-    if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
-  }
-
-  if (CONFIG.SWAP_wSUI_wDUBHE.enabled && CONFIG.SWAP_wSUI_wDUBHE.repeat > 0) {
-    await swapTokens(client, keypair, {
-      amount: CONFIG.SWAP_wSUI_wDUBHE.amount,
-      path: CONTRACTS.PATHS.wSUI_wDUBHE,
-      label: 'Swap wSUI -> wDUBHE',
-      repeat: CONFIG.SWAP_wSUI_wDUBHE.repeat,
-    });
-    if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
-  }
-
-  if (CONFIG.SWAP_wDUBHE_wSUI.enabled && CONFIG.SWAP_wDUBHE_wSUI.repeat > 0) {
-    await swapTokens(client, keypair, {
-      amount: CONFIG.SWAP_wDUBHE_wSUI.amount,
-      path: CONTRACTS.PATHS.wDUBHE_wSUI,
-      label: 'Swap wDUBHE -> wSUI',
-      repeat: CONFIG.SWAP_wDUBHE_wSUI.repeat,
-    });
-    if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
-  }
-
-  if (CONFIG.SWAP_wSUI_wSTARS.enabled && CONFIG.SWAP_wSUI_wSTARS.repeat > 0) {
-    await swapTokens(client, keypair, {
-      amount: CONFIG.SWAP_wSUI_wSTARS.amount,
-      path: CONTRACTS.PATHS.wSUI_wSTARS,
-      label: 'Swap wSUI -> wSTARS',
-      repeat: CONFIG.SWAP_wSUI_wSTARS.repeat,
-    });
-    if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
-  }
-
-  if (CONFIG.SWAP_wSTARS_wSUI.enabled && CONFIG.SWAP_wSTARS_wSUI.repeat > 0) {
-    await swapTokens(client, keypair, {
-      amount: CONFIG.SWAP_wSTARS_wSUI.amount,
-      path: CONTRACTS.PATHS.wSTARS_wSUI,
-      label: 'Swap wSTARS -> wSUI',
-      repeat: CONFIG.SWAP_wSTARS_wSUI.repeat,
-    });
-    if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
-  }
-
-  if (CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.enabled) {
-    await addLiquidity(client, keypair, {
-      sharedObject: CONTRACTS.SHARED_OBJECT,
-      asset0: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.asset0,
-      asset1: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.asset1,
-      amount0: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.amount0,
-      amount1: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.amount1,
-      min0: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.min0,
-      min1: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.min1,
-      recipient: address,
-      label: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.label,
-    });
-    if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
-  }
-
-  if (CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.enabled) {
-    await addLiquidity(client, keypair, {
-      sharedObject: CONTRACTS.SHARED_OBJECT,
-      asset0: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.asset0,
-      asset1: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.asset1,
-      amount0: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.amount0,
-      amount1: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.amount1,
-      min0: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.min0,
-      min1: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.min1,
-      recipient: address,
-      label: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.label,
-    });
-    if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
-  }
-
-  if (CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.enabled) {
-    await addLiquidity(client, keypair, {
-      sharedObject: CONTRACTS.SHARED_OBJECT,
-      asset0: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.asset0,
-      asset1: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.asset1,
-      amount0: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.amount0,
-      amount1: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.amount1,
-      min0: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.min0,
-      min1: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.min1,
-      recipient: address,
-      label: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.label,
-    });
-    if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
+  logger.error(`${label} failed for ${address}: ${e.message}`);
+  if (e.message.toLowerCase().includes('blocked') || e.message.toLowerCase().includes('block')) {
+    logger.info('thx - transaksi diblokir testnet sui');
   }
 }
 
 async function main() {
   logger.banner();
-  const keys = readKeys();
-  logger.info(`Loaded ${keys.length} wallet(s)`);
+
   const proxies = await loadProxies();
+  const keys = readKeys();
+  const txCount = await getTransactionCount();
+
+  await displayCountdown();
 
   while (true) {
-    const txCount = await getTransactionCount();
+    for (const key of keys) {
+      const keypair = key.type === 'mnemonic' ? key.keypair : Ed25519Keypair.fromSecretKey(decodeSuiPrivateKey(key.value).secretKey);
 
-    for (let i = 0; i < txCount; i++) {
-      logger.info(`Starting transaction cycle ${i + 1}/${txCount}`);
-      for (const keyData of keys) {
+      const proxy = getRandomProxy(proxies);
+      const client = new SuiClient({
+        fullnode: getFullnodeUrl('testnet'),
+        ...(proxy ? { agent: proxy.agent } : {}),
+      });
+
+      for (let i = 0; i < txCount; i++) {
         try {
-          await replayWithKey(keyData, proxies);
+          if (CONFIG.WRAP.enabled) {
+            const resWrap = await wrapSUI(client, keypair, CONFIG.WRAP.amount);
+            logTx('Wrap SUI', keypair, resWrap.digest);
+          }
+
+          if (CONFIG.SWAP_wSUI_wDUBHE.enabled) {
+            for (let j = 0; j < CONFIG.SWAP_wSUI_wDUBHE.repeat; j++) {
+              const resSwap = await swap(client, keypair, CONFIG.SWAP_wSUI_wDUBHE.amount, CONTRACTS.PATHS.wSUI_wDUBHE);
+              logTx('Swap wSUI -> wDUBHE', keypair, resSwap.digest);
+            }
+          }
+
+          if (CONFIG.SWAP_wDUBHE_wSUI.enabled) {
+            for (let j = 0; j < CONFIG.SWAP_wDUBHE_wSUI.repeat; j++) {
+              const resSwapBack = await swap(client, keypair, CONFIG.SWAP_wDUBHE_wSUI.amount, CONTRACTS.PATHS.wDUBHE_wSUI);
+              logTx('Swap wDUBHE -> wSUI', keypair, resSwapBack.digest);
+            }
+          }
+
+          if (CONFIG.SWAP_wSUI_wSTARS.enabled) {
+            for (let j = 0; j < CONFIG.SWAP_wSUI_wSTARS.repeat; j++) {
+              const resSwapStars = await swap(client, keypair, CONFIG.SWAP_wSUI_wSTARS.amount, CONTRACTS.PATHS.wSUI_wSTARS);
+              logTx('Swap wSUI -> wSTARS', keypair, resSwapStars.digest);
+            }
+          }
+
+          if (CONFIG.SWAP_wSTARS_wSUI.enabled) {
+            for (let j = 0; j < CONFIG.SWAP_wSTARS_wSUI.repeat; j++) {
+              const resSwapStarsBack = await swap(client, keypair, CONFIG.SWAP_wSTARS_wSUI.amount, CONTRACTS.PATHS.wSTARS_wSUI);
+              logTx('Swap wSTARS -> wSUI', keypair, resSwapStarsBack.digest);
+            }
+          }
+
+          // You can add other transactions like ADD_LIQUIDITY similarly here...
+
+          await new Promise(r => setTimeout(r, CONFIG.DELAY_BETWEEN_TX_MS));
         } catch (e) {
-          logger.error(`Error processing key: ${e.message}`);
-        }
-        if (CONFIG.DELAY_BETWEEN_TX_MS) {
-          await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
+          logError('Transaction', keypair, e);
         }
       }
     }
-    logger.success(`All ${txCount} transaction cycles completed`);
-    await displayCountdown();
   }
 }
 
 main().catch((e) => {
   logger.error(`Fatal error: ${e.message}`);
-  rl.close();
   process.exit(1);
 });
