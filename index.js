@@ -29,7 +29,7 @@ const logger = {
   banner: () => {
     console.log(`${colors.cyan}${colors.bold}`);
     console.log(`--------------------------------------------------`);
-    console.log(`    Merak Testnet Auto Bot - Cryptodai3     `);
+    console.log(`    Duhhe Engine Tesnet Bot - Zonaairdrop    `);
     console.log(`--------------------------------------------------${colors.reset}\n`);
   },
 };
