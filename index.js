@@ -29,7 +29,7 @@ const logger = {
   banner: () => {
     console.log(`${colors.cyan}${colors.bold}`);
     console.log(`--------------------------------------------------`);
-    console.log(`   Duhhe Engine Tesnet Bot - Zonaairdrop   `);
+    console.log(`   Dubhe Engine Tesnet Bot - Zonaairdrop   `);
     console.log(`--------------------------------------------------${colors.reset}\n`);
   },
 };
@@ -91,7 +91,7 @@ const CONFIG = {
     min1: 1,
     label: 'Add Liquidity wDUBHE-wSTARS',
   },
-  DELAY_BETWEEN_TX_MS: 5000,
+  DELAY_BETWEEN_TX_MS: 50,
 };
 
 const CONTRACTS = {
@@ -259,6 +259,27 @@ function displayCountdown() {
   });
 }
 
+// Fungsi ini hanya bisa menampilkan pesan di logger, TIDAK bisa menyimpan pesan "thx" di blokchain SUI
+function logTx(label, keypair, digest) {
+  const address = keypair.getPublicKey().toSuiAddress();
+  logger.step(`${label} untuk ${address}`);
+  if (digest) {
+    logger.info(`Transaction: https://testnet.suivision.xyz/txblock/${digest}`);
+    logger.success(`Transaksi sukses dan tercatat di blok SUI. Terima kasih!`);
+    logger.warn(`Catatan: Pesan "thx" hanya muncul di bot ini. Jika ingin ada pesan di explorer/blockchain SUI, Move contract harus support event/pesan string.`);
+  } else {
+    logger.error('Transaksi gagal atau tidak ditemukan di blok SUI!');
+  }
+}
+
+function logError(label, keypair, e) {
+  logger.error(`${label} failed for ${keypair.getPublicKey().toSuiAddress()}: ${e.message}`);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function wrapWsuI(client, keypair) {
   logger.loading(`Wrapping wSUI for ${keypair.getPublicKey().toSuiAddress()}`);
   const txb = new TransactionBlock();
@@ -269,6 +290,8 @@ async function wrapWsuI(client, keypair) {
       txb.object(CONTRACTS.SHARED_OBJECT),
       splitCoin,
       txb.pure.address(keypair.getPublicKey().toSuiAddress()),
+      // Jika Move contract support pesan string, tambahkan di sini:
+      // txb.pure("thx dari bot ZonaAirdrop!", "string")
     ],
     typeArguments: ['0x2::sui::SUI'],
   });
@@ -296,6 +319,8 @@ async function swapTokens(client, keypair, { amount, path, label, repeat }) {
         txb.pure(BigInt(1), 'u256'),
         txb.pure(path, 'vector<u256>'),
         txb.pure.address(keypair.getPublicKey().toSuiAddress()),
+        // Jika Move contract support pesan string, tambahkan di sini:
+        // txb.pure("thx dari bot ZonaAirdrop!", "string")
       ],
       typeArguments: [],
     });
@@ -326,6 +351,8 @@ async function addLiquidity(client, keypair, { sharedObject, asset0, asset1, amo
       txb.pure(BigInt(min0), 'u256'),
       txb.pure(BigInt(min1), 'u256'),
       txb.pure.address(recipient),
+      // Jika Move contract support pesan string, tambahkan di sini:
+      // txb.pure("thx dari bot ZonaAirdrop!", "string")
     ],
     typeArguments: [],
   });
@@ -338,26 +365,6 @@ async function addLiquidity(client, keypair, { sharedObject, asset0, asset1, amo
   } catch (e) {
     logError(label, keypair, e);
   }
-}
-
-// PERUBAHAN: Hanya tampilkan pesan "thx" jika transaksi benar-benar sukses/digest ada
-function logTx(label, keypair, digest) {
-  const address = keypair.getPublicKey().toSuiAddress();
-  logger.step(`${label} untuk ${address}`);
-  if (digest) {
-    logger.info(`Transaction: https://testnet.suivision.xyz/txblock/${digest}`);
-    logger.success(`Transaksi sukses dan tercatat di blok SUI. Terima kasih!`);
-  } else {
-    logger.error('Transaksi gagal atau tidak ditemukan di blok SUI!');
-  }
-}
-
-function logError(label, keypair, e) {
-  logger.error(`${label} failed for ${keypair.getPublicKey().toSuiAddress()}: ${e.message}`);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function replayWithKey(keyData, proxies) {
@@ -434,21 +441,6 @@ async function replayWithKey(keyData, proxies) {
     if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
   }
 
-  if (CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.enabled) {
-    await addLiquidity(client, keypair, {
-      sharedObject: CONTRACTS.SHARED_OBJECT,
-      asset0: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.asset0,
-      asset1: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.asset1,
-      amount0: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.amount0,
-      amount1: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.amount1,
-      min0: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.min0,
-      min1: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.min1,
-      recipient: address,
-      label: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.label,
-    });
-    if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
-  }
-
   if (CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.enabled) {
     await addLiquidity(client, keypair, {
       sharedObject: CONTRACTS.SHARED_OBJECT,
@@ -458,8 +450,23 @@ async function replayWithKey(keyData, proxies) {
       amount1: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.amount1,
       min0: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.min0,
       min1: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.min1,
-      recipient: address,
+      recipient: keypair.getPublicKey().toSuiAddress(),
       label: CONFIG.ADD_LIQUIDITY_wSUI_wDUBHE.label,
+    });
+    if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
+  }
+
+  if (CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.enabled) {
+    await addLiquidity(client, keypair, {
+      sharedObject: CONTRACTS.SHARED_OBJECT,
+      asset0: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.asset0,
+      asset1: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.asset1,
+      amount0: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.amount0,
+      amount1: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.amount1,
+      min0: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.min0,
+      min1: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.min1,
+      recipient: keypair.getPublicKey().toSuiAddress(),
+      label: CONFIG.ADD_LIQUIDITY_wSUI_wSTARS.label,
     });
     if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
   }
@@ -473,7 +480,7 @@ async function replayWithKey(keyData, proxies) {
       amount1: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.amount1,
       min0: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.min0,
       min1: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.min1,
-      recipient: address,
+      recipient: keypair.getPublicKey().toSuiAddress(),
       label: CONFIG.ADD_LIQUIDITY_wDUBHE_wSTARS.label,
     });
     if (CONFIG.DELAY_BETWEEN_TX_MS) await sleep(CONFIG.DELAY_BETWEEN_TX_MS);
@@ -507,8 +514,4 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  logger.error(`Fatal error: ${e.message}`);
-  rl.close();
-  process.exit(1);
-});
+main();
